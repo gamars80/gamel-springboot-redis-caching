@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0.30
+    container_name: gamel-mysql-container
+    hostname: gamel-mysql-container
+    environment:
+      MYSQL_ROOT_PASSWORD: 1234
+      MYSQL_DATABASE: gamel
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - backend_network
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p1234" ]
+      interval: 20s
+      retries: 5
+      timeout: 5s
+
+  redis:
+    image: redis:latest
+    container_name: gamel-redis-container
+    hostname: gamel-redis-container
+    ports:
+      - "6379:6379"
+    command: redis-server /etc/redis/redis.conf
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/etc/redis/redis.conf
+    networks:
+      - backend_network
+
+  springboot-app:
+    build:
+      context: .
+      dockerfile: DockerFile  # Dockerfile의 실제 이름, 보통 "Dockerfile" (대소문자 주의)
+    container_name: gamel-springboot-container
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://gamel-mysql-container:3306/gamel
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: 1234
+      SPRING_REDIS_HOST: gamel-redis-container
+      SPRING_REDIS_PORT: 6379
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - backend_network
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  backend_network:
