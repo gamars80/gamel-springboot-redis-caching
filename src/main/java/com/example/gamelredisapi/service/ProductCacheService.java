@@ -56,4 +56,36 @@ public class ProductCacheService {
         }
     }
 
+    // 상품 상세 캐시 키 생성
+    public String buildProductDetailCacheKey(Long productId) {
+        return String.format("product:detail:%d", productId);
+    }
+
+    // 캐시에서 상품 상세 조회 (캐시된 값이 ProductDto 형식이면 반환)
+    public ProductDto getCachedProductDetail(String key) {
+        Object cached = redisTemplate.opsForValue().get(key);
+        if (cached instanceof ProductDto) {
+            return (ProductDto) cached;
+        }
+        return null;
+    }
+
+    // 상품 상세 정보를 캐시에 저장 (TTL에 약간의 랜덤 지터 적용)
+    public void cacheProductDetail(String key, ProductDto productDto) {
+        Duration ttlWithJitter = TTL.plusSeconds((long)(Math.random() * 5));
+        redisTemplate.opsForValue().set(key, productDto, ttlWithJitter);
+    }
+
+    // 분산 락 획득 (setIfAbsent 사용)
+    public boolean acquireLock(String lockKey, Duration timeout) {
+        Boolean success = redisTemplate.opsForValue().setIfAbsent(lockKey, "locked", timeout);
+        return Boolean.TRUE.equals(success);
+    }
+
+    // 분산 락 해제
+    public void releaseLock(String lockKey) {
+        redisTemplate.delete(lockKey);
+    }
+
+
 }

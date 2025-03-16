@@ -31,4 +31,10 @@ public class ProductController {
         ProductDto updatedProduct = productService.updateProductPrice(productId, request.getPrice());
         return ResponseEntity.ok(updatedProduct);
     }
+
+    @GetMapping("/detail/{id}")
+    public ResponseEntity<ProductDto> getProductDetail(@PathVariable Long id) {
+        ProductDto productDto = productService.getProductDetail(id);
+        return ResponseEntity.ok(productDto);
+    }
 }
