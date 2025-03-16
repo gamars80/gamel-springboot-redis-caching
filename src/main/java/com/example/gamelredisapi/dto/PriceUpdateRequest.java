@@ -1,15 +1,12 @@
 package com.example.gamelredisapi.dto;
 
-import java.math.BigDecimal;
+import lombok.*;
 
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class PriceUpdateRequest {
-    private BigDecimal price;
-
-    // Getter & Setter
-    public BigDecimal getPrice() {
-        return price;
-    }
-    public void setPrice(BigDecimal price) {
-        this.price = price;
-    }
+    private int price;
 }

@@ -32,11 +32,28 @@ public class ProductCacheService {
         return null;
     }
 
-    public void evictCategoryCache(Long categoryId) {
+    public void updateProductPriceInCache(Long categoryId, Long productId, int newPrice) {
         String pattern = "product:category:" + categoryId + ":page:*";
         Set<String> keys = redisTemplate.keys(pattern);
         if (keys != null && !keys.isEmpty()) {
-            redisTemplate.delete(keys);
+            for (String key : keys) {
+                Object cached = redisTemplate.opsForValue().get(key);
+                if (cached instanceof PageDto) {
+                    PageDto<ProductDto> pageDto = (PageDto<ProductDto>) cached;
+                    boolean updated = false;
+                    for (ProductDto dto : pageDto.getContent()) {
+                        if (dto.getId().equals(productId)) {
+                            dto.setPrice(newPrice);
+                            updated = true;
+                        }
+                    }
+                    // 캐시 내에 상품이 존재했다면 재설정
+                    if (updated) {
+                        redisTemplate.opsForValue().set(key, pageDto, TTL);
+                    }
+                }
+            }
         }
     }
+
 }

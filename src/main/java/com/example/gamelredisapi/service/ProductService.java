@@ -4,6 +4,8 @@ import com.example.gamelredisapi.dto.PageDto;
 import com.example.gamelredisapi.dto.ProductDto;
 import com.example.gamelredisapi.entity.Product;
 import com.example.gamelredisapi.repository.ProductRepository;
+import jakarta.persistence.EntityNotFoundException;
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
@@ -52,6 +54,21 @@ public class ProductService {
 
         productCacheService.cacheProductPage(cacheKey, pageDto); // DTO 형태로 캐싱
         return dtoPage;
+    }
+
+
+    @Transactional
+    public ProductDto updateProductPrice(Long productId, int newPrice) {
+        // 1. 상품 조회 및 가격 업데이트
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new EntityNotFoundException("상품을 찾을 수 없습니다."));
+        product.setPrice(newPrice);
+        productRepository.save(product);
+
+        // 2. 캐시 데이터 업데이트 (Write-Through)
+        productCacheService.updateProductPriceInCache(product.getCategoryId(), productId, newPrice);
+
+        return ProductDto.fromEntity(product);
     }
 
     private Page<ProductDto> convertToPage(PageDto<ProductDto> dto, int page, int size) {
