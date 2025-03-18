@@ -7,6 +7,8 @@ import com.example.gamelredisapi.repository.ProductRepository;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -15,6 +17,9 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -22,6 +27,7 @@ public class ProductService {
 
     private final ProductRepository productRepository;
     private final ProductCacheService productCacheService;
+    private final RedissonClient redissonClient;
 
 
     // 상품 목록 조회 – 페이지 번호별 캐싱 (페이지당 20개)
@@ -81,44 +87,48 @@ public class ProductService {
         );
     }
 
-    // 상품 상세 조회 (캐시 스탬피드 방지 적용)
     public ProductDto getProductDetail(Long productId) {
         String cacheKey = productCacheService.buildProductDetailCacheKey(productId);
-        // 1. 먼저 캐시에서 조회
+
+        // 1. 캐시에서 먼저 조회
         ProductDto cachedProduct = productCacheService.getCachedProductDetail(cacheKey);
         if (cachedProduct != null) {
             return cachedProduct;
         }
 
-        // 2. 캐시가 없으면 락을 획득 (분산 락)
         String lockKey = "lock:" + cacheKey;
-        boolean lockAcquired = productCacheService.acquireLock(lockKey, Duration.ofSeconds(5));
-        if (lockAcquired) {
-            try {
-                // 락 획득 후 다시 캐시 확인 (더블체크)
-                cachedProduct = productCacheService.getCachedProductDetail(cacheKey);
-                if (cachedProduct != null) {
-                    return cachedProduct;
-                }
-                // 캐시 미존재 → DB에서 조회
-                Product product = productRepository.findById(productId)
-                        .orElseThrow(() -> new EntityNotFoundException("상품을 찾을 수 없습니다."));
-                ProductDto productDto = ProductDto.fromEntity(product);
-                // 캐시에 저장 (TTL에 랜덤 지터 적용)
-                productCacheService.cacheProductDetail(cacheKey, productDto);
-                return productDto;
-            } finally {
-                productCacheService.releaseLock(lockKey);
-            }
-        } else {
-            // 락을 획득하지 못한 경우 잠시 대기 후 재시도 (재귀 호출)
-            try {
+        RLock lock = redissonClient.getLock(lockKey);
+        boolean isLockAcquired = false;
+        try {
+            // 최대 5초 동안 락을 시도하고, 락 획득 후 5초 동안 유지
+            isLockAcquired = lock.tryLock(5, 5, TimeUnit.SECONDS);
+            if (!isLockAcquired) {
+                // 락 획득 실패 시 짧게 대기 후 재시도 (여기서는 재귀 호출)
                 Thread.sleep(50);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                return getProductDetail(productId);
             }
-            return getProductDetail(productId);
+
+            // 락 획득 후 더블체크
+            cachedProduct = productCacheService.getCachedProductDetail(cacheKey);
+            if (cachedProduct != null) {
+                return cachedProduct;
+            }
+
+            // DB에서 제품 조회
+            Product product = productRepository.findById(productId)
+                    .orElseThrow(() -> new EntityNotFoundException("상품을 찾을 수 없습니다."));
+            ProductDto productDto = ProductDto.fromEntity(product);
+
+            // 캐시에 저장 (TTL 및 랜덤 지터 적용)
+            productCacheService.cacheProductDetail(cacheKey, productDto);
+            return productDto;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        } finally {
+            if (isLockAcquired) {
+                lock.unlock();
+            }
         }
     }
-
 }
